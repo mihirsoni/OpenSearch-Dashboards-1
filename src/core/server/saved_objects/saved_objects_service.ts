@@ -430,6 +430,7 @@ export class SavedObjectsService
         this.typeRegistry,
         opensearchDashboardsConfig.index,
         opensearchClient,
+        sqlClient,
         includedHiddenTypes
       );
     };
