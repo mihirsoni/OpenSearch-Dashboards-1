@@ -32,6 +32,7 @@
 
 import { omit } from 'lodash';
 import uuid from 'uuid';
+import sqlite3 from 'sqlite3';
 import {
   OpenSearchClient,
   DeleteDocumentResponse,
@@ -109,6 +110,7 @@ export interface SavedObjectsRepositoryOptions {
   serializer: SavedObjectsSerializer;
   migrator: IOpenSearchDashboardsMigrator;
   allowedTypes: string[];
+  sqlClient: sqlite3.Database;
 }
 
 /**
@@ -148,6 +150,7 @@ export class SavedObjectsRepository {
   private _registry: SavedObjectTypeRegistry;
   private _allowedTypes: string[];
   private readonly client: RepositoryOpenSearchClient;
+  private readonly sqlClient: sqlite3.Database;
   private _serializer: SavedObjectsSerializer;
 
   /**
@@ -163,6 +166,7 @@ export class SavedObjectsRepository {
     typeRegistry: SavedObjectTypeRegistry,
     indexName: string,
     client: OpenSearchClient,
+    sqlClient: sqlite3.Database,
     includedHiddenTypes: string[] = [],
     injectedConstructor: any = SavedObjectsRepository
   ): ISavedObjectsRepository {
@@ -188,6 +192,7 @@ export class SavedObjectsRepository {
       serializer,
       allowedTypes,
       client,
+      sqlite3,
     });
   }
 
@@ -199,6 +204,7 @@ export class SavedObjectsRepository {
       typeRegistry,
       serializer,
       migrator,
+      sqlClient,
       allowedTypes = [],
     } = options;
 
@@ -214,6 +220,7 @@ export class SavedObjectsRepository {
     this._mappings = mappings;
     this._registry = typeRegistry;
     this.client = createRepositoryOpenSearchClient(client);
+    this.sqlClient = sqlClient;
     if (allowedTypes.length === 0) {
       throw new Error('Empty or missing types for saved object repository!');
     }
@@ -305,7 +312,7 @@ export class SavedObjectsRepository {
       body: raw._source,
       ...(overwrite && version ? decodeRequestVersion(version) : {}),
     };
-
+    console.log('requestParams', JSON.stringify(requestParams));
     const { body } =
       id && overwrite
         ? await this.client.index(requestParams)
