@@ -313,17 +313,14 @@ export class SavedObjectsRepository {
       body: raw._source,
       ...(overwrite && version ? decodeRequestVersion(version) : {}),
     };
-    // console.trace(`requestParams INSERT INTO kibana (id, body, updated_at) values (${requestParams.id}, json('${JSON.stringify(
-    //   requestParams.body
-    // ')}), '${time}')`);
     const { body } =
       id && overwrite
         ? await this.client.index(requestParams)
         : await this.client.create(requestParams);
     await this.sqliteClient.exec(
-      `INSERT INTO kibana(id, body, updated_at) VALUES('${
+      `INSERT INTO kibana(id, body, type, updated_at) VALUES('${
         requestParams.id
-      }', json('${JSON.stringify(requestParams.body)}'), '${time}')`
+      }', json('${JSON.stringify(requestParams.body)}'), '${type}', '${time}')`
     );
     return this._rawToSavedObject<T>({
       ...raw,
@@ -827,6 +824,7 @@ export class SavedObjectsRepository {
         }),
       },
     };
+    // console.log('opensearchOptions', JSON.stringify(opensearchOptions, null, 4))
 
     const { body, statusCode } = await this.client.search<SearchResponse<any>>(opensearchOptions, {
       ignore: [404],
@@ -873,6 +871,8 @@ export class SavedObjectsRepository {
     objects: SavedObjectsBulkGetObject[] = [],
     options: SavedObjectsBaseOptions = {}
   ): Promise<SavedObjectsBulkResponse<T>> {
+    console.log('objects', objects);
+    console.log('options', objects);
     const namespace = normalizeNamespace(options.namespace);
 
     if (objects.length === 0) {
@@ -912,6 +912,11 @@ export class SavedObjectsRepository {
         _index: this.getIndexForType(type),
         _source: includedFields(type, fields),
       }));
+    // console.log('bulkGetDocs', bulkGetDocs);
+    const sqlResp = await this.sqliteClient.all(
+      `SELECT * from kibana where id IN(${bulkGetDocs.map((doc) => `'${doc._id}'`).join(',')})`
+    );
+    // console.log('sqlResp', sqlResp);
     const bulkGetResponse = bulkGetDocs.length
       ? await this.client.mget(
           {
@@ -922,7 +927,7 @@ export class SavedObjectsRepository {
           { ignore: [404] }
         )
       : undefined;
-
+    // console.log('expectedResult', JSON.stringify(bulkGetResponse, null, 4));
     return {
       saved_objects: expectedBulkGetResults.map((expectedResult) => {
         if (isLeft(expectedResult)) {
@@ -930,22 +935,33 @@ export class SavedObjectsRepository {
         }
 
         const { type, id, opensearchRequestIndex } = expectedResult.value;
-        const doc = bulkGetResponse?.body.docs[opensearchRequestIndex];
-
-        if (!doc.found || !this.rawDocExistsInNamespace(doc, namespace)) {
+        // TODO:: This is bad, FIELD fucnction should ensure order figure it out.
+        const doc = sqlResp.find(
+          (row: any) => row.id === this._serializer.generateRawId(namespace, type, id)
+        );
+        const temp = JSON.parse(doc?.body);
+        if (
+          !doc.body ||
+          !this.rawDocExistsInNamespace(
+            {
+              _source: temp,
+              _id: doc.id,
+            },
+            namespace
+          )
+        ) {
           return ({
             id,
             type,
             error: errorContent(SavedObjectsErrorHelpers.createGenericNotFoundError(type, id)),
           } as any) as SavedObject<T>;
         }
-
-        const { originId, updated_at: updatedAt } = doc._source;
+        // console.log('Hmmm temp', temp);
+        // console.log('Hmmm type', type);
+        const { originId, updated_at: updatedAt } = temp;
         let namespaces = [];
         if (!this._registry.isNamespaceAgnostic(type)) {
-          namespaces = doc._source.namespaces ?? [
-            SavedObjectsUtils.namespaceIdToString(doc._source.namespace),
-          ];
+          namespaces = temp.namespaces ?? [SavedObjectsUtils.namespaceIdToString(temp.namespace)];
         }
 
         return {
@@ -954,10 +970,10 @@ export class SavedObjectsRepository {
           namespaces,
           ...(originId && { originId }),
           ...(updatedAt && { updated_at: updatedAt }),
-          version: encodeHitVersion(doc),
-          attributes: doc._source[type],
-          references: doc._source.references || [],
-          migrationVersion: doc._source.migrationVersion,
+          version: encodeHitVersion({ _primary_term: 1, _seq_no: 2 }), // FIx this with SQL Transaction
+          attributes: temp[type],
+          references: temp.references || [],
+          migrationVersion: temp.migrationVersion,
         };
       }),
     };
@@ -994,7 +1010,7 @@ export class SavedObjectsRepository {
     // console.log('esResp', JSON.stringify(body));
     // console.log('sqlResp', JSON.parse(sqlResp.body));
     // console.log('type', type);
-    const docNotFound = body.found === false;
+    const docNotFound = body.found === false || sqlResp === undefined;
     const indexNotFound = statusCode === 404;
     if (docNotFound || indexNotFound || !this.rawDocExistsInNamespace(body, namespace)) {
       // see "404s from missing index" above
@@ -1079,7 +1095,7 @@ export class SavedObjectsRepository {
         doc
       )}') WHERE id = '${this._serializer.generateRawId(namespace, type, id)}'`
     );
-    console.log(`Doc to be updated is ${JSON.stringify(doc)}`);
+    // console.log(`Doc to be updated is ${JSON.stringify(doc)}`);
 
     if (statusCode === 404) {
       // see "404s from missing index" above
