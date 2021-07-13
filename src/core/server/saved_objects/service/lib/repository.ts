@@ -752,6 +752,7 @@ export class SavedObjectsRepository {
       preference,
     } = options;
 
+
     if (!type && !typeToNamespacesMap) {
       throw SavedObjectsErrorHelpers.createBadRequestError(
         'options.type must be a string or an array of strings'
@@ -989,9 +990,10 @@ export class SavedObjectsRepository {
       },
       { ignore: [404] }
     );
-    const sqlResp = await this.sqliteClient.get(`SELECT id,json(body) FROM kibana WHERE id="${this._serializer.generateRawId(namespace, type, id)}"`);
-    console.log('esResp', JSON.stringify(body));
-    console.log('sqlResp', JSON.stringify(sqlResp));
+    const sqlResp = await this.sqliteClient.get(`SELECT id,body FROM kibana WHERE id="${this._serializer.generateRawId(namespace, type, id)}"`);
+    // console.log('esResp', JSON.stringify(body));
+    // console.log('sqlResp', JSON.parse(sqlResp.body));
+    // console.log('type', type);
     const docNotFound = body.found === false;
     const indexNotFound = statusCode === 404;
     if (docNotFound || indexNotFound || !this.rawDocExistsInNamespace(body, namespace)) {
@@ -1007,17 +1009,17 @@ export class SavedObjectsRepository {
         SavedObjectsUtils.namespaceIdToString(body._source.namespace),
       ];
     }
-
+    const temp = JSON.parse(sqlResp.body);
     return {
       id,
       type,
       namespaces,
       ...(originId && { originId }),
       ...(updatedAt && { updated_at: updatedAt }),
-      version: encodeHitVersion(body),
-      attributes: body._source[type],
-      references: body._source.references || [],
-      migrationVersion: body._source.migrationVersion,
+      // version: encodeHitVersion(body),
+      attributes: temp[type],
+      references: temp.references || [],
+      migrationVersion: temp.migrationVersion,
     };
   }
 
