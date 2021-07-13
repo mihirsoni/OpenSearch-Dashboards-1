@@ -230,7 +230,9 @@ export class OpenSearchDashboardsMigrator {
     //     })
     //   );
     // });
-    await this.sqliteClient.run('CREATE TABLE IF NOT EXISTS kibana (id TEXT, body JSON, updated_at TEXT)')
+    await this.sqliteClient.run(
+      'CREATE TABLE IF NOT EXISTS kibana (id TEXT, body JSON, updated_at TEXT)'
+    );
     return Promise.all(migrators.map((migrator) => migrator.migrate()));
   }
 
